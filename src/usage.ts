@@ -225,17 +225,24 @@ export async function openLogin(options: { bin?: string; account?: AccountSpec }
   const loginLine = loginArgs.map(q).join(" ")
 
   if (process.platform === "win32") {
+    // cmd has its own quote parsing and Bun also escapes embedded quotes when
+    // spawning on Windows, so an inline `start "Title" cmd /k "..."` is
+    // unreliable (start ends up treating the title as the program). Instead we
+    // write a temp .cmd script — the quoting lives inside the file, untouched
+    // by Bun — set HOME/USERPROFILE in it (inherited by the new window's cmd),
+    // and hand cmd /c nothing but the script path.
     const lines = ["@echo off"]
     if (home) {
       lines.push(`set "HOME=${home}"`)
       lines.push(`set "USERPROFILE=${home}"`)
     }
-    lines.push(loginLine)
-    lines.push("pause") // keep the window open so the user sees the result / any error
+    // `start` opens a new console window; `cmd /k` keeps it open after login so
+    // the user sees the result (and any error) and can close it.
+    lines.push(`start "Volcengine Ark SSO login" cmd /k ${loginLine}`)
     const safeLabel = (spec?.label ?? "default").replace(/[^\w.-]+/g, "_")
     const scriptPath = join(tmpdir(), `opencode-volcengine-quota-login-${safeLabel}.cmd`)
     writeFileSync(scriptPath, lines.join("\r\n") + "\r\n", "utf8")
-    Bun.spawn(["cmd", "/d", "/c", `start "Volcengine Ark SSO login" "${scriptPath}"`], {
+    Bun.spawn(["cmd", "/d", "/c", scriptPath], {
       stdin: "ignore",
       stdout: "ignore",
       stderr: "ignore",
